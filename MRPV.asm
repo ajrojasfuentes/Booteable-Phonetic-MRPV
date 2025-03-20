@@ -1,49 +1,69 @@
 [org 0x7E00]
 [bits 16]
 %define SCREEN 0XB800
-%include "macros.asm"
 
-; ==================== PROGRAMA PRINCIPAL ====================
+; --------------------------------------------------------------------------
+; Subrutina: main
+;
+; Descripción:
+;   Punto de entrada del programa. Ejecuta 3 rondas en las que se calcula la
+;   semilla (a partir de ticks y RTC), se generan 5 letras pseudoaleatorias, se
+;   leen y evalúan 5 entradas fonéticas, y se espera 5 segundos entre rondas.
+;   Al finalizar, se termina la ejecución del programa.
+;
+; Parámetros (Entrada):
+;   - N/A.
+;
+; Registros modificados:
+;   - Se utilizan registros generales según cada subrutina.
+;
+; Retorno (Salida):
+;   - N/A.
+;
+; Ejemplo de uso:
+;         ; Al iniciar el programa, se ejecuta el bucle principal.
+;
+; --------------------------------------------------------------------------
 main:
+    mov bx, 1            ; Se realizarán 3 rondas (BX = 1, 2, 3)
 
-; ------------------------------------------------------
-; 1) Repetir el proceso 3 veces
-; ------------------------------------------------------
-mov bx, 1            ; CX = 3 iteraciones
 main_loop:
-
+    ; ----------------------------------------------------------------------
+    ; Mostrar mensaje de inicio de ronda
+    ; ----------------------------------------------------------------------
     mov si, msgstart
     call print
 
-    ; (A) Calcular la semilla desde ticks + RTC
+    ; ----------------------------------------------------------------------
+    ; (A) Calcular la semilla a partir de ticks y RTC
+    ; ----------------------------------------------------------------------
     call SetSeedFromTime
 
     mov si, msg1
     call print
 
+    ; ----------------------------------------------------------------------
     ; (B) Generar 5 letras (A..Z) y mostrarlas
+    ; ----------------------------------------------------------------------
     call GenerateAndPrint
 
-    mov si, msg2
-    call print
+    ; ----------------------------------------------------------------------
+    ; (C) Leer 5 cadenas (entradas fonéticas) y evaluarlas
+    ; ----------------------------------------------------------------------
+    call ProcessEntries
 
-    ; (C) leer 5 strings
-    call ReadEntries
-
-    mov si, msg3
-    call print
-
-    ; (D) comparar las 5 strings vs las letras
-    call CompareEntries
-
-    ; (E) esperar 5s antes de la próxima ronda
+    ; ----------------------------------------------------------------------
+    ; (E) Esperar aproximadamente 5 segundos antes de la siguiente ronda
+    ; ----------------------------------------------------------------------
     call Wait5
 
     inc bx
     cmp bx, 4
-    jne main_loop       ; Incrementa BX, salta si aún no es 4
+    jne main_loop       ; Se repite mientras BX sea menor a 4
 
-    ; Si BX = 4 => ya hicimos 3 rondas, salir
+    ; ----------------------------------------------------------------------
+    ; Terminar la ejecución del programa
+    ; ----------------------------------------------------------------------
     call End
 
 ; --------------------------------------------------------------------------
@@ -115,11 +135,29 @@ SetSeedFromTime:
     pop ds               ; Restaura DS
     ret                  ; Retorna al llamador
 
-; ------------------------------------------------------
+; --------------------------------------------------------------------------
 ; Subrutina: GenerateAndPrint
-; - Usa LCG_RAND16 -> [0..25], + 'A' -> [A..Z], 5 letras
-; - Imprime la cadena y un salto de línea
-; ------------------------------------------------------
+;
+; Descripción:
+;   Genera 5 letras pseudoaleatorias en el rango ['A'..'Z'] mediante la subrutina
+;   LCG_RAND16. Las letras generadas se almacenan en el buffer global 'buffer' y se
+;   imprimen en pantalla, seguidas de un salto de línea.
+;
+; Parámetros (Entrada):
+;   - N/A.
+;
+; Registros modificados:
+;   - AX, BX, CX, SI.
+;   - Se preservan y restauran los registros críticos.
+;
+; Retorno (Salida):
+;   - 'buffer' contendrá la cadena de 5 letras generadas (terminada en 0).
+;
+; Ejemplo de uso:
+;         call GenerateAndPrint
+;         ; Se mostrará la cadena de letras en pantalla.
+;
+; --------------------------------------------------------------------------
 GenerateAndPrint:
     push ax
     push bx
@@ -129,27 +167,19 @@ GenerateAndPrint:
     mov cx, 5
     xor bx, bx
 .gen_letter:
-
-    mov si, msgCG
-    call print
-
-    call LCG_RAND16       ; AX = [0..25]
-
-    add al, 'A'       ; => ['A'..'Z']
-    mov [buffer+bx], al
+    call LCG_RAND16       ; AX = número pseudoaleatorio [0..25]
+    add al, 'A'           ; Convertir a letra (A..Z)
+    mov [buffer+bx], al   ; Almacenar en 'buffer'
     inc bx
     loop .gen_letter
 
-    ; terminador nulo
-    mov byte [buffer+bx], 0
-
-    ; Imprimir la cadena
+    mov byte [buffer+bx], 0   ; Terminador nulo
 
     mov si, buffer
-    call print
+    call print            ; Imprimir la cadena de letras
 
     mov si, ln
-    call print
+    call print            ; Imprimir salto de línea
 
     pop si
     pop cx
@@ -157,13 +187,33 @@ GenerateAndPrint:
     pop ax
     ret
 
-; ------------------------------------------------------
-; Subrutina: ReadEntries
-;   - Pide al usuario que ingrese 5 strings.
-;   - Cada string se guarda en userInput + (i*21).
-;   - Muestra un mensaje para cada entrada.
-; ------------------------------------------------------
-ReadEntries:
+; --------------------------------------------------------------------------
+; Subrutina: ProcessEntries
+;
+; Descripción:
+;   Pide al usuario que ingrese 5 cadenas de texto (entradas fonéticas) y, tan
+;   pronto que se recibe cada entrada, la compara con la palabra esperada obtenida
+;   a partir de la letra generada en 'buffer' y la tabla fonética 'phonTable'. Si la
+;   entrada es correcta se muestra "OK" y se incrementa un contador; si es incorrecta,
+;   se muestra "NO". Al finalizar las 5 entradas, se imprime en pantalla un contador
+;   que indica el puntaje total (cantidad de aciertos).
+;
+; Parámetros (Entrada):
+;   - N/A.
+;
+; Registros modificados:
+;   - AX, BX, CX, DX, SI, DI.
+;   - Se guardan y restauran los registros críticos.
+;
+; Retorno (Salida):
+;   - N/A. Se imprime en pantalla el puntaje total de aciertos.
+;
+; Ejemplo de uso:
+;         call ProcessEntries
+;         ; Se pedirá al usuario 5 entradas y se mostrará el puntaje total.
+;
+; --------------------------------------------------------------------------
+ProcessEntries:
     push ax
     push bx
     push cx
@@ -171,18 +221,72 @@ ReadEntries:
     push si
     push di
 
-    mov bx, 0          ; índice 0..4
+    xor bx, bx        ; BX = 0, índice de entrada (0 a 4)
+    xor dx, dx        ; DX = 0, contador de aciertos
 
-reading:
-
+.process_loop:
+    ; 1) Mostrar mensaje de solicitud de entrada
     mov si, msgentry
     call print
 
+    ; 2) Leer una entrada y almacenarla en el buffer global 'entry'
     call read
 
-    inc bx
+    ; 3) Obtener la palabra esperada:
+    ;    - Extraer la letra generada correspondiente a la entrada actual
+
+    ;mov si, buffer
+    ;call print
+    xor ax, ax
+    mov al, [buffer + bx]    ; Obtener la letra del buffer
+    ;mov si, al
+    ;call print
+    sub al, 'A'              ; Convertir a índice (0..25)
+    mov ah, 0
+    shl ax, 1                ; Multiplicar el índice por 2 (cada puntero ocupa 2 bytes)
+
+    ; Ahora AX es el offset en la tabla.
+
+    push bx                ; Preserva el índice original
+    mov bx, ax             ; BX = offset en phonTable
+    mov si, phonTable      ; SI apunta al inicio de la tabla fonética
+    add si, bx             ; SI = dirección del puntero de la palabra esperada
+    mov ax, [si]           ; Cargar el puntero (la dirección de la cadena)
+    mov si, ax             ; SI ahora apunta a la palabra fonética esperada
+    pop bx                 ; Recupera el índice original
+
+    ;call print             ; Se imprime la palabra para verificar (debugeando)
+
+    ; 4) Comparar la entrada del usuario con la palabra esperada:
+    mov di, entry         ; DI = dirección del buffer 'entry'
+    call CMP_STR          ; Compara SI (esperada) y DI (entrada); resultado en AL
+
+    cmp al, 1
+    je .print_ok
+    mov si, msgNo
+    call print
+    jmp .print_next
+.print_ok:
+    mov si, msgOk
+    call print
+    inc dx                ; Incrementa el contador de aciertos
+.print_next:
+    mov si, ln
+    call print
+
+    inc bx                ; Siguiente entrada
     cmp bx, 5
-    jne reading
+    jl .process_loop
+
+    ; 5) Imprimir el puntaje total
+    mov si, msgScore
+    call print
+    mov al, dl            ; DL contiene el puntaje total (0..5)
+    add al, '0'           ; Convertir a carácter ASCII
+    mov ah, 0x0E
+    int 0x10              ; Imprimir el dígito
+    mov si, ln
+    call print
 
     pop di
     pop si
@@ -192,65 +296,29 @@ reading:
     pop ax
     ret
 
-; ------------------------------------------------------
-; Subrutina: CompareEntries
-;   - Compara la primera letra de cada string en userInput
-;     con la letra generada en buffer[i].
-;   - Si coinciden => imprimir "OK"
-;     De lo contrario => imprimir "NO"
-;   - Usa PRINT_STRING o PRINT_LB para mostrar resultados.
-; ------------------------------------------------------
-CompareEntries:
-    push ax
-    push bx
-    push si
-    push di
-
-    mov bx, 0             ; índice 0..4
-.cmp_loop:
-    ; 1) Calcular dirección en userInput + (bx*21)
-    mov si, entry
-    mov ax, 21
-    mul bx
-    add si, ax
-    ; En [si] estará el primer carácter de la i-ésima cadena
-
-    ; 2) Comparar con buffer[bx]
-    mov di, buffer
-    add di, bx
-
-    ; cargar en AL el primer char typed, en BL la letra generada
-    mov al, [si]     ; primer char del string ingresado
-    mov bl, [di]     ; letra generada en la pos i
-
-    cmp al, bl
-    jne .not_ok
-
-    ; Si son iguales => imprimir "OK"
-    PSTR msgOk
-    PRINT_LB
-    jmp .next
-
-.not_ok:
-    PSTR msgNo
-    PRINT_LB
-
-.next:
-    inc bx
-    cmp bx, 5
-    jl .cmp_loop
-
-    pop di
-    pop si
-    pop bx
-    pop ax
-    ret
-
-; ------------------------------------------------------
+; --------------------------------------------------------------------------
 ; Subrutina: Wait5
-; - Espera ~5 segundos usando 0x046C
-;   5 * 18.2 ~ 91 ticks
-; ------------------------------------------------------
+;
+; Descripción:
+;   Espera aproximadamente 5 segundos utilizando el contador de ticks de la BIOS
+;   (offset 0x046C). Se suman alrededor de 91 ticks, asumiendo una tasa de 18.2
+;   ticks por segundo.
+;
+; Parámetros (Entrada):
+;   - N/A.
+;
+; Registros modificados:
+;   - DS, AX, BX.
+;   - DS y BX se preservan y restauran.
+;
+; Retorno (Salida):
+;   - N/A.
+;
+; Ejemplo de uso:
+;         call Wait5
+;         ; Se espera ~5 segundos antes de continuar.
+;
+; --------------------------------------------------------------------------
 Wait5:
     push ds
     push ax
@@ -260,7 +328,7 @@ Wait5:
     mov ds, ax
 
     mov bx, [0x046C]
-    add bx, 91         ; ~5s
+    add bx, 91         ; Aproximadamente 5 segundos (91 ticks)
 
 .wait_loop:
     mov ax, [0x046C]
@@ -272,13 +340,33 @@ Wait5:
     pop ds
     ret
 
-; ------------------------------------------------------
+; --------------------------------------------------------------------------
 ; Subrutina: End
-; - Espera ~8 segundos mediante el contador en 0x046C
-;   ~18.2 ticks/s => 8s ~ 146 ticks
-; ------------------------------------------------------
+;
+; Descripción:
+;   Finaliza la ejecución del programa. En entornos sin sistema operativo,
+;   se reinicia el sistema utilizando INT 19h (Bootstrap).
+;
+; Parámetros (Entrada):
+;   - N/A.
+;
+; Registros modificados:
+;   - N/A.
+;
+; Retorno (Salida):
+;   - N/A.
+;
+; Ejemplo de uso:
+;         call End
+;         ; El sistema se reinicia o el programa se detiene.
+;
+; --------------------------------------------------------------------------
 End:
     EXIT
+
+; --------------------------------------------------------------------------
+;                          Subrutinas Auxiliares
+; --------------------------------------------------------------------------
 
 ; --------------------------------------------------------------------------
 ; Subrutina: print
@@ -511,41 +599,81 @@ LCG_RAND16:
     pop bx               ; Restaura BX
     ret                  ; Retorna, dejando en AX el valor pseudoaleatorio [0..25]
 
+; --------------------------------------------------------------------------
+; Subrutina: CMP_STR
+;
+; Descripción:
+;   Compara dos cadenas de caracteres terminadas en 0, byte a byte.
+;
+; Parámetros (Entrada):
+;   - SI: Dirección de la primera cadena.
+;   - DI: Dirección de la segunda cadena.
+;
+; Registros modificados:
+;   - AX, SI, DI.
+;
+; Retorno (Salida):
+;   - AL = 1 si las cadenas son iguales.
+;   - AL = 0 si difieren.
+;
+; Ejemplo de uso:
+;         mov si, cadena1
+;         mov di, cadena2
+;         call CMP_STR
+;         cmp al, 1
+;         je iguales
+;         jne diferentes
+;
+; --------------------------------------------------------------------------
+CMP_STR:
+    push si
+    push di
+    push ax
+.CMP_LOOP:
+    mov al, [si]
+    cmp al, [di]
+    jne .not_equal
+    cmp al, 0
+    je .equal
+    inc si
+    inc di
+    jmp .CMP_LOOP
+.not_equal:
+    xor al, al         ; AL = 0 (cadenas diferentes)
+    jmp .done
+.equal:
+    mov al, 1          ; AL = 1 (cadenas iguales)
+.done:
+    pop ax
+    pop di
+    pop si
+    ret
 
+; --------------------------------------------------------------------------
+;                          VARIABLES
+; --------------------------------------------------------------------------
+seed        dw 0
+msgstart    db "Ejecutando MRPV...", 0x0D, 0x0A, 0
+ln          db 0x0D, 0x0A, 0
+msgentry    db "Digite el Fonetico: ", 0
+msg1        db "Semilla Generada...", 0x0D, 0x0A, 0
+msg2        db "Letras Generadas...", 0x0D, 0x0A, 0
+msgCG       db "CGL...", 0x0D, 0x0A, 0
+msg3        db "Entradas tomadas...", 0x0D, 0x0A, 0
+msgOk       db "OK", 0x0D, 0x0A, 0
+msgNo       db "NO", 0x0D, 0x0A, 0
+msgScore    db "Puntaje: ", 0
 
-
-; -----------------------------------------------------------------
-;                            VARIABLES
-; -----------------------------------------------------------------
-
-; -------------------- VARIABLES INICIALIZADAS --------------------
-
-seed dw 0
-msgstart db "Ejecutando MRPV...", 0x0D, 0x0A, 0
-ln db 0x0D, 0x0A, 0
-msgentry db "Digite el Fonetico: ", 0
-msg1 db "Semilla Generada...", 0x0D, 0x0A, 0
-msg2 db "Letras Generadas...", 0x0D, 0x0A, 0
-msgCG db "CGL...", 0x0D, 0x0A, 0
-msg3 db "Entradas tomadas...", 0x0D, 0x0A, 0
-msgTE db "Tomando entrada...", 0x0D, 0x0A, 0
-msgOk db "OK", 0x0D, 0x0A, 0
-msgNo db "NO", 0x0D, 0x0A, 0
-
-
-; -------------------- VARIABLES NO INICIALIZADAS --------------------
-buffer times 6 db 0           ; 5 letras + terminador
-entry times 40 db 0       ; 5 strings * 21 bytes c/u (5*21=105)
-input  resb 8
-
+buffer      times 6 db 0           ; 5 letras + terminador
+entry       times 40 db 0          ; Buffer para entrada de 40 bytes (cadena terminada en 0)
+input       resb 8
 
 ; -------------------- TABLA FONETICA --------------------
-
 phonTable:
- dw pAlfa, pBravo, pCharlie, pDelta, pEcho, pFoxtrot, pGolf, pHotel
- dw pIndia, pJuliet, pKilo, pLima, pMike, pNovember, pOscar, pPapa
- dw pQuebec, pRomeo, pSierra, pTango, pUniform, pVictor, pWhiskey
- dw pXray, pYankee, pZulu
+    dw pAlfa, pBravo, pCharlie, pDelta, pEcho, pFoxtrot, pGolf, pHotel
+    dw pIndia, pJuliet, pKilo, pLima, pMike, pNovember, pOscar, pPapa
+    dw pQuebec, pRomeo, pSierra, pTango, pUniform, pVictor, pWhiskey
+    dw pXray, pYankee, pZulu
 
 pAlfa     db "Alfa",0
 pBravo    db "Bravo",0
